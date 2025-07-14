@@ -1,7 +1,12 @@
 package com.vaibhav.springsecurity.security;
 
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.JWKSource;
 import com.vaibhav.springsecurity.entities.UserRoles;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
 import org.springframework.security.config.Customizer;
@@ -13,13 +18,19 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.jdbc.JdbcDaoImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.provisioning.JdbcUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 
 import javax.sql.DataSource;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.interfaces.RSAPublicKey;
+import java.util.UUID;
 
-//@Configuration
-public class BasicAuthSecurityConfiguration {
+@Configuration
+public class JwtSecurityConfiguration {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity request) throws Exception {
         request
@@ -50,25 +61,50 @@ public class BasicAuthSecurityConfiguration {
                                             }
                                     );
                         }
+                )
+                .oauth2ResourceServer(
+                        (oauth2) -> {
+                            oauth2.jwt(Customizer.withDefaults());
+                        }
                 );
 
         return request.build();
     }
 
-//    @Bean
-//    public UserDetailsService users() {
-//        UserDetails user = User.withUsername("user")
-//                .password("{noop}test")
-//                .roles(UserRoles.USER.name())
-//                .build();
-//
-//        UserDetails admin = User.withUsername("admin")
-//                .password("{noop}admin!23")
-//                .roles(UserRoles.ADMIN.name())
-//                .build();
-//
-//        return new InMemoryUserDetailsManager(user, admin);
-//    }
+    @Bean
+    public KeyPair keyPair() {
+        KeyPairGenerator keyPairGenerator = null;
+        try {
+            keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+        } catch (Exception ex) {
+            throw new RuntimeException(ex);
+        }
+        keyPairGenerator.initialize(2048);
+
+        return keyPairGenerator.generateKeyPair();
+    }
+
+    @Bean
+    public RSAKey rsaKey(KeyPair keyPair) {
+        return new RSAKey.Builder((RSAPublicKey) keyPair.getPublic())
+                .privateKey(keyPair.getPrivate())
+                .keyID(UUID.randomUUID().toString())
+                .build();
+    }
+
+    @Bean
+    public JWKSource jwkSource(RSAKey rsaKey) {
+        JWKSet jwkSet = new JWKSet(rsaKey);
+
+        return ((jwkSelector, context) -> jwkSelector.select(jwkSet));
+    }
+
+    @Bean
+    public JwtDecoder jwtDecoder(RSAKey rsaKey) throws JOSEException {
+        return NimbusJwtDecoder
+                .withPublicKey(rsaKey.toRSAPublicKey())
+                .build();
+    }
 
     @Bean
     public DataSource dataSource() {
@@ -81,14 +117,12 @@ public class BasicAuthSecurityConfiguration {
     @Bean
     public UserDetailsService users(DataSource dataSource) {
         UserDetails user = User.withUsername("user")
-//                .password("{noop}test")
                 .password("test")
                 .passwordEncoder(str -> passwordEncoder().encode(str))
                 .roles(UserRoles.USER.name())
                 .build();
 
         UserDetails admin = User.withUsername("admin")
-//                .password("{noop}admin!23")
                 .password("admin")
                 .passwordEncoder(str -> passwordEncoder().encode(str))
                 .roles(UserRoles.ADMIN.name())
